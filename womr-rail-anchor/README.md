@@ -1,73 +1,84 @@
 # womr-rail-anchor
 
-Tells the agent, **in-band**, when `bun womr.ts` is executing code that is not the repo's.
+Puts `bun womr.ts lanes doctor`'s verdict in front of the agent **at the moment of use**.
 
-## The problem
+## What this is now
 
-`bun womr.ts` resolves `@womr/*` through `node_modules`. When those links resolve into a
-kanban **worker workspace** instead of the repository, the rail runs a finished worker's
-checkout. Results are uncited in both directions: a verb the repo has may be missing from
-what actually runs, and a green result proves nothing about repo source. This has recurred,
-and residue from a previous half-cure is still on disk as `.ignored_*` links.
+A thin adapter. It does not detect anything itself.
 
-## Why a plugin, not the shell script it replaces
+- **Detection** → `lanes doctor` (the rail). 268 links scanned, with
+  `self` / `foreign` / `dangling` / `unauthorized` / `pnpm-store` classes.
+- **Parsing** → the `toon` CLI (`@toon-format/cli`), which decodes the receipt to typed JSON.
+- **This plugin** → decides breach-vs-blind from the decoded payload, and delivers it.
 
-The predecessor is a bash script on a 15-minute systemd timer, writing to a log nobody is
-reading at the moment the rail is used. This injects the warning **into the turn**, so the
-warning arrives at the moment of use rather than on a cadence — and there is no timer to
-fall behind.
+An earlier version scanned `node_modules` itself: **20 links against the rail's 268**, and
+without any of the rail's classes. It existed only because `lanes doctor` was returning 96
+false `unauthorized` findings from a non-canonicalised pnpm store root — a bug, since fixed.
+A hand-rolled TOON regex parser was also written here and thrown away once `toon -d` was
+found. Both are the same mistake: reimplementing an authority that already works.
 
-## Seam
+## Why the plugin still exists
 
-`pre_llm_call` is the one hook whose return value is honoured: returning `{"context": ...}`
-appends to the current turn's user message. Silent when the rail is anchored — a clean rail
-says nothing.
+The rail cannot arrive unprompted. A breach matters the instant someone composes a
+`bun womr.ts` command — not whenever a person remembers to run a health check. The
+predecessor to this plugin was a 15-minute systemd timer writing to a log, which proved that
+a cadence nobody reads is not a guard.
 
-## Classification is by target, never by name
+So: **the rail decides, the plugin delivers.**
 
-| class | meaning | breach |
-|---|---|---|
-| `OK` | resolves inside the repo | no |
-| `STORE` | pnpm content-addressable store | no |
-| `WORKSPACE` | resolves into a kanban worker workspace | **yes** |
-| `CACHE` | reapable tmpfs tier | **yes** |
-| `OUTSIDE` | anywhere else, including a dangling link | **yes** |
+| hook | what it does |
+|---|---|
+| `pre_llm_call` | injects the verdict into the turn, in-band |
+| `pre_tool_call` | optionally refuses to run the rail while breached (opt-in) |
 
-Two failure modes this encodes, both learned the hard way:
+## The blind rule
 
-- **Name-based scanning under-reports.** v1 of the shell audit walked only `@womr` and found
-  3 breaches; a full walk classified by target finds 8, because `@effect` links into the same
-  workspaces were invisible to it.
-- **Store links are not breaches.** A first cut of this port flagged all 15 pnpm store links
-  as `OUTSIDE`, burying the 8 real breaches under 15 false ones. A detector that cries wolf
-  is a detector nobody reads.
+A receipt that cannot be read is a **breach, not a pass** — an instrument that cannot look
+must never report clean. But blind and breached are handled differently:
 
-An **empty scan is a breach**, not a pass: finding nothing means the scan could not look.
+- the **warning** fires on blind (surfacing "unknown" is safe and useful)
+- the **gate** never blocks on blind (blocking on an unreadable instrument wedges the shell)
+
+## Guards
+
+| guard | why it is load-bearing |
+|---|---|
+| gate off by default | warning is the belt; blocking is opt-in suspenders |
+| never gates `pnpm install` | blocking the cure makes the breach unfixable from inside |
+| `terminal` tool only, rail commands only | narrow blast radius |
+| kill switch beats enforcement | one env var disables everything |
+| interval cache (default 300s) | the rail costs ~1.3s; do not pay it per turn |
+| subprocess timeout | a hung check yields blind, never a stalled turn |
+| all exceptions swallowed | a bug in this guard must not wedge the operator |
 
 ## Activation (operator-gated)
 
-Installed disabled.
-
 ```bash
-hermes plugins enable womr-rail-anchor
+hermes plugins enable womr-rail-anchor      # then a gateway restart
 ```
 
 Rollback: `hermes plugins disable womr-rail-anchor`, or `WOMR_RAIL_ANCHOR_DISABLE=1`.
 
 ## Tuning
 
-| Env | Default | Meaning |
+| env | default | meaning |
 |---|---|---|
 | `WOMR_RAIL_ANCHOR_DISABLE` | unset | any non-empty, non-`0`/`false` value disables |
-| `WOMR_ROOT` | `/home/wom/infra/womr` | repo whose `node_modules` is audited |
-| `WOMR_RAIL_ANCHOR_INTERVAL_SECONDS` | 300 | minimum seconds between filesystem walks |
+| `WOMR_RAIL_ANCHOR_ENFORCE` | unset | set to enable the blocking gate |
+| `WOMR_ROOT` | `/home/wom/infra/womr` | repo the rail is run against |
+| `WOMR_RAIL_ANCHOR_INTERVAL_SECONDS` | 300 | minimum seconds between rail invocations |
+| `WOMR_RAIL_ANCHOR_TIMEOUT_SECONDS` | 20 | per-subprocess timeout |
+| `WOMR_TOON_BIN` | `toon` | path to the TOON decoder |
 
 ## Test
 
 ```bash
-python3 test/test_anchor.py     # 16 tests, pure, no runtime and no filesystem
-hermes plugins doctor .          # validates against the real loader
+python3 test/test_doctor.py    # 15 — verdict rule over decoded receipts, pure dicts
+python3 test/test_gate.py      # 14 — hook behaviour, rail stubbed
+hermes plugins doctor . --ci   # validates against the real loader
 ```
 
-Equivalence with the shell audit it replaces was verified against the live repo: same 8
-`WORKSPACE` breaches, zero false positives.
+Proven end-to-end 2026-08-19 against a **real** breach: an `@womr/rail` link repointed outside
+a dedicated lane produced `ok:false, unauthorizedCount=1`, decoded through `toon -d`, and
+yielded a breach verdict naming the offending path. Three negative controls confirm the suite
+is not vacuous — making blind read as clean, or the gate stop blocking, each turns it red.

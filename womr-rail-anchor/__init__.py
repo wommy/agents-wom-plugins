@@ -1,31 +1,30 @@
-"""Tell the agent, in-band, when the womr rail is anchor-breached.
+"""Put `lanes doctor`'s verdict in front of the agent at the moment of use.
 
-WHY THIS EXISTS
-`bun womr.ts` resolves @womr/* through node_modules. When those links resolve into
-a kanban WORKER WORKSPACE instead of the repo, the rail executes a done worker's
-checkout: results are uncited, and a verb the repo has may be missing from what
-actually runs. This has recurred, and the residue of a previous half-cure is still
-on disk as `.ignored_*` links.
+WHY A PLUGIN AT ALL. `bun womr.ts lanes doctor` already owns detection and does
+it far better than this plugin ever did (268 links scanned vs 20, plus
+self/foreign/dangling/unauthorized/pnpm-store classes). What the rail cannot do
+is arrive unprompted. A breach matters at the instant someone composes a
+`bun womr.ts` command, not whenever a person remembers to run a health check --
+and the predecessor to this file, a 15-minute systemd timer writing to a log,
+proved that a cadence nobody reads is not a guard.
 
-WHY A PLUGIN AND NOT THE SHELL SCRIPT IT REPLACES
-The predecessor is a bash script on a 15-minute systemd timer. A timer writes to a
-log nobody is reading at the moment the rail is used. This injects the warning into
-the turn itself, so the agent learns the rail is untrustworthy BEFORE composing a
-command against it -- at the moment of use, not on a cadence.
+So the split is: the RAIL decides, this plugin DELIVERS.
+  pre_llm_call   inject the verdict into the turn, so the agent sees it in-band
+  pre_tool_call  optionally refuse to run the rail while it is breached (opt-in)
 
-SEAM: `pre_llm_call` is the one hook whose return value is honoured; returning
-{"context": ...} appends to the current turn's user message. Observer otherwise.
-
-Detection lives in `anchor.py` (pure, 16 tests). This file is wiring and caching.
+Detection logic lives in the rail. Receipt parsing and the verdict rule live in
+doctor.py (pure). This file is subprocess + cache + hook wiring only.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
+import subprocess
 import time
 from typing import Any
 
-from . import anchor
+from . import doctor
 
 logger = logging.getLogger(__name__)
 
@@ -33,51 +32,20 @@ DISABLE_ENV = "WOMR_RAIL_ANCHOR_DISABLE"
 ENFORCE_ENV = "WOMR_RAIL_ANCHOR_ENFORCE"
 REPO_ENV = "WOMR_ROOT"
 INTERVAL_ENV = "WOMR_RAIL_ANCHOR_INTERVAL_SECONDS"
+TIMEOUT_ENV = "WOMR_RAIL_ANCHOR_TIMEOUT_SECONDS"
+TOON_BIN_ENV = "WOMR_TOON_BIN"
 
 DEFAULT_REPO = "/home/wom/infra/womr"
-WORKSPACE_ROOT = "/home/wom/.hermes/kanban/workspaces"
 DEFAULT_INTERVAL_SECONDS = 300
+# The rail takes ~1.3s on a clean tree. Bound it so a hung check cannot stall a
+# turn; a timeout yields a BLIND verdict, which warns but never blocks.
+DEFAULT_TIMEOUT_SECONDS = 20
 
-def _scan_links(node_modules: str) -> list:
-    """Walk every scope, one level into each @scope. IO lives here, not in anchor."""
-    out = []
-    try:
-        entries = sorted(os.listdir(node_modules))
-    except OSError:
-        return out
-    for entry in entries:
-        path = os.path.join(node_modules, entry)
-        if entry.startswith("@"):
-            try:
-                inner = sorted(os.listdir(path))
-            except OSError:
-                continue
-            for sub in inner:
-                sub_path = os.path.join(path, sub)
-                if os.path.islink(sub_path):
-                    out.append(("%s/%s" % (entry, sub), _resolve(sub_path)))
-        elif os.path.islink(path):
-            out.append((entry, _resolve(path)))
-    return out
+# Commands that would execute the rail. Substring match, not a parse: a false
+# miss only costs the warning we already give.
+_RAIL_MARKERS = ("womr.ts", "bun womr")
 
-
-def _resolve(path: str) -> Optional[str]:
-    try:
-        return os.path.realpath(path)
-    except OSError:
-        return None
-
-
-def audit(repo_root: str, workspace_root: str) -> list:
-    """Return [(name, verdict)] for every link under the repo's node_modules."""
-    links = _scan_links(os.path.join(repo_root, "node_modules"))
-    return [
-        (name, anchor.classify(name, target, repo_root, workspace_root))
-        for name, target in links
-    ]
-
-
-_cache: dict = {"at": 0.0, "rows": None}
+_cache: dict = {"at": 0.0, "verdict": None}
 
 
 def _int_env(name: str, default: int) -> int:
@@ -88,89 +56,102 @@ def _int_env(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-def _audit_cached(repo: str):
-    """Filesystem walk is cheap but not free; do it at most once per interval."""
+def _disabled() -> bool:
+    return os.environ.get(DISABLE_ENV, "").strip() not in ("", "0", "false")
+
+
+def _run_doctor(repo: str):
+    """The only IO. Runs the rail, decodes its receipt, returns a Verdict.
+
+    Decoding goes through the `toon` CLI rather than a parser written here: the
+    receipt is TOON, and @toon-format/cli already decodes it to typed JSON.
+    Never raises -- every failure path yields a BLIND verdict.
+    """
+    timeout = _int_env(TIMEOUT_ENV, DEFAULT_TIMEOUT_SECONDS)
+    try:
+        proc = subprocess.run(
+            ["bun", "womr.ts", "lanes", "doctor"],
+            cwd=repo, capture_output=True, text=True, timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return doctor.blind("could not run lanes doctor: %s" % exc)
+    if not (proc.stdout or "").strip():
+        detail = (proc.stderr or "").strip().splitlines()
+        return doctor.blind(
+            "lanes doctor produced no output (rc=%d)%s"
+            % (proc.returncode, (": " + detail[0][:120]) if detail else "")
+        )
+    try:
+        decoded = subprocess.run(
+            [os.environ.get(TOON_BIN_ENV) or "toon", "-d"],
+            input=proc.stdout, capture_output=True, text=True, timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return doctor.blind("toon CLI unavailable, cannot decode receipt: %s" % exc)
+    if decoded.returncode != 0:
+        return doctor.blind("toon failed to decode the receipt")
+    try:
+        return doctor.verdict(json.loads(decoded.stdout))
+    except ValueError as exc:
+        return doctor.blind("decoded receipt is not JSON: %s" % exc)
+
+
+def _verdict_cached(repo: str):
     now = time.monotonic()
     interval = _int_env(INTERVAL_ENV, DEFAULT_INTERVAL_SECONDS)
-    if _cache["rows"] is not None and (now - _cache["at"]) < interval:
-        return _cache["rows"]
-    rows = audit(repo, WORKSPACE_ROOT)
-    _cache["at"], _cache["rows"] = now, rows
-    return rows
-
-
-def _message(breaches) -> str:
-    listed = "\n".join(
-        "  %s %s" % (verdict, name) for name, verdict in sorted(breaches)[:12]
-    )
-    more = len(breaches) - 12
-    if more > 0:
-        listed += "\n  ... and %d more" % more
-    return (
-        "RAIL ANCHOR BREACH -- %d link(s) in the womr node_modules resolve outside the "
-        "repository:\n%s\n"
-        "`bun womr.ts` is therefore executing code that does not match the repo source. "
-        "Treat BOTH its successes and its failures as uncited, and read the repo source "
-        "directly when a finding depends on rail behaviour. Repair is `pnpm install` in "
-        "%s -- NEVER `bun install`, and NOT while lanes are flying."
-        % (len(breaches), listed, os.environ.get(REPO_ENV, DEFAULT_REPO))
-    )
+    cached = _cache["verdict"]
+    if cached is not None and (now - _cache["at"]) < interval:
+        return cached
+    v = _run_doctor(repo)
+    _cache["at"], _cache["verdict"] = now, v
+    return v
 
 
 def pre_llm_call(**kwargs: Any):
-    """Inject a breach warning into the turn. Silent when the rail is anchored."""
+    """Inject the rail's verdict into the turn. Silent when the tree is clean."""
     try:
-        if os.environ.get(DISABLE_ENV, "").strip() not in ("", "0", "false"):
+        if _disabled():
             return None
         repo = os.environ.get(REPO_ENV) or DEFAULT_REPO
-        if not os.path.isdir(os.path.join(repo, "node_modules")):
-            return None  # not a womr checkout; nothing to say
-        rows = _audit_cached(repo)
-        breaches = [(n, v) for n, v in rows if v in anchor.BREACH_CLASSES]
-        if not breaches:
+        if not os.path.isdir(repo):
+            return None  # not this machine's womr checkout; nothing to say
+        v = _verdict_cached(repo)
+        if not v.breach:
             return None  # a clean rail says nothing
-        return {"context": _message(breaches)}
+        return {"context": doctor.message(v)}
     except Exception:
         logger.warning("womr-rail-anchor: check skipped", exc_info=True)
         return None
 
 
-# Commands that would execute the rail. Matched conservatively: a substring hit on
-# the entrypoint, not a parse. A false miss only costs the warning we already give.
-_RAIL_MARKERS = ("womr.ts", "bun womr")
-
-
 def pre_tool_call(tool_name: str = "", args: Any = None, **_: Any):
-    """Refuse to run the rail while it is anchor-breached. OPT-IN.
+    """Refuse to run the rail while breached. OPT-IN via WOMR_RAIL_ANCHOR_ENFORCE.
 
-    Off by default: the pre_llm_call warning is the belt, and this is the
-    suspenders for when an operator wants the breach to be non-negotiable. It is
-    deliberately narrow -- it gates ONLY commands that would execute the rail, and
-    never the repair (`pnpm install`) or any diagnostic.
+    Never gates the repair (`pnpm install`), and never blocks on a BLIND verdict:
+    an unreadable instrument is a reason to warn, not to wedge the operator's
+    shell. Warning is the belt; this is the suspenders.
     """
     try:
-        if os.environ.get(DISABLE_ENV, "").strip() not in ("", "0", "false"):
+        if _disabled():
             return None
         if os.environ.get(ENFORCE_ENV, "").strip() in ("", "0", "false"):
-            return None  # warn-only unless explicitly enforced
+            return None
         if tool_name != "terminal":
             return None
         command = (args or {}).get("command") or ""
         if not any(marker in command for marker in _RAIL_MARKERS):
             return None
         repo = os.environ.get(REPO_ENV) or DEFAULT_REPO
-        rows = _audit_cached(repo)
-        breaches = [(n, v) for n, v in rows if v in anchor.BREACH_CLASSES]
-        if not breaches:
+        v = _verdict_cached(repo)
+        if not v.breach or v.blind:
             return None
         return {
             "action": "block",
             "message": (
-                "REFUSED: the womr rail is anchor-breached (%d link(s) resolve outside "
-                "the repo), so this command would execute code that is not the repo's "
-                "and its result would be uncited either way. Repair with `pnpm install` "
-                "in %s -- never `bun install`, and not while lanes are flying. To run it "
-                "anyway, unset %s." % (len(breaches), repo, ENFORCE_ENV)
+                "REFUSED: %s. This command would execute code that is not the repo's, "
+                "so its result would be uncited either way. Repair with `pnpm install` "
+                "in %s -- never `bun install`. To run it anyway, unset %s."
+                % (v.reason, repo, ENFORCE_ENV)
             ),
         }
     except Exception:
@@ -184,4 +165,4 @@ def register(ctx: Any) -> None:
     ctx.register_hook("pre_tool_call", pre_tool_call)
 
 
-__all__ = ["pre_llm_call", "pre_tool_call", "register", "anchor"]
+__all__ = ["pre_llm_call", "pre_tool_call", "register", "doctor"]
