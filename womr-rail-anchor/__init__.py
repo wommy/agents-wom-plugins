@@ -34,6 +34,24 @@ REPO_ENV = "WOMR_ROOT"
 INTERVAL_ENV = "WOMR_RAIL_ANCHOR_INTERVAL_SECONDS"
 TIMEOUT_ENV = "WOMR_RAIL_ANCHOR_TIMEOUT_SECONDS"
 TOON_BIN_ENV = "WOMR_TOON_BIN"
+BUN_BIN_ENV = "WOMR_BUN_BIN"
+
+# The gateway's PATH is hermes' libexec + ~/.local/bin + /usr/local/bin -- neither
+# `bun` nor `toon` is on it. Resolving by name alone would make every check BLIND
+# inside the very process this plugin exists to serve, so fall back to absolute
+# locations before giving up.
+_BUN_FALLBACKS = ("/home/linuxbrew/.linuxbrew/bin/bun", "/home/wom/.local/bin/bun", "/usr/local/bin/bun")
+_TOON_FALLBACKS = ("/home/wom/.local/share/pnpm/bin/toon", "/home/wom/.local/share/pnpm/bin/toon")
+
+
+def _resolve(env_name: str, fallbacks) -> str:
+    override = os.environ.get(env_name, "").strip()
+    if override:
+        return override
+    for candidate in fallbacks:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return fallbacks[0]
 
 DEFAULT_REPO = "/home/wom/infra/womr"
 DEFAULT_INTERVAL_SECONDS = 300
@@ -70,7 +88,7 @@ def _run_doctor(repo: str):
     timeout = _int_env(TIMEOUT_ENV, DEFAULT_TIMEOUT_SECONDS)
     try:
         proc = subprocess.run(
-            ["bun", "womr.ts", "lanes", "doctor"],
+            [_resolve(BUN_BIN_ENV, _BUN_FALLBACKS), "womr.ts", "lanes", "doctor"],
             cwd=repo, capture_output=True, text=True, timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -83,7 +101,7 @@ def _run_doctor(repo: str):
         )
     try:
         decoded = subprocess.run(
-            [os.environ.get(TOON_BIN_ENV) or "toon", "-d"],
+            [_resolve(TOON_BIN_ENV, _TOON_FALLBACKS), "-d"],
             input=proc.stdout, capture_output=True, text=True, timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -101,10 +119,10 @@ def _verdict_cached(repo: str):
     interval = _int_env(INTERVAL_ENV, DEFAULT_INTERVAL_SECONDS)
     cached = _cache["verdict"]
     if cached is not None and (now - _cache["at"]) < interval:
-        return cached
+        return cached, False
     v = _run_doctor(repo)
     _cache["at"], _cache["verdict"] = now, v
-    return v
+    return v, True
 
 
 def pre_llm_call(**kwargs: Any):
@@ -115,9 +133,12 @@ def pre_llm_call(**kwargs: Any):
         repo = os.environ.get(REPO_ENV) or DEFAULT_REPO
         if not os.path.isdir(repo):
             return None  # not this machine's womr checkout; nothing to say
-        v = _verdict_cached(repo)
+        v, fresh = _verdict_cached(repo)
         if not v.breach:
             return None  # a clean rail says nothing
+        if v.blind and not fresh:
+            return None  # an unverifiable check is a background condition, not
+            # something to repeat every turn; a CONFIRMED breach still repeats.
         return {"context": doctor.message(v)}
     except Exception:
         logger.warning("womr-rail-anchor: check skipped", exc_info=True)
@@ -142,7 +163,7 @@ def pre_tool_call(tool_name: str = "", args: Any = None, **_: Any):
         if not any(marker in command for marker in _RAIL_MARKERS):
             return None
         repo = os.environ.get(REPO_ENV) or DEFAULT_REPO
-        v = _verdict_cached(repo)
+        v, _fresh = _verdict_cached(repo)
         if not v.breach or v.blind:
             return None
         return {

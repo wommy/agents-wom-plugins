@@ -124,5 +124,43 @@ class TestCache(GateBase):
         self.assertEqual(len(calls), 1)
 
 
+class TestBinaryResolution(GateBase):
+    """The gateway PATH has neither bun nor toon; resolution must not rely on it."""
+
+    def test_resolves_bun_to_an_executable_absolute_path(self):
+        m = load()
+        resolved = m._resolve(m.BUN_BIN_ENV, m._BUN_FALLBACKS)
+        self.assertTrue(os.path.isabs(resolved), resolved)
+        self.assertTrue(os.access(resolved, os.X_OK), resolved)
+
+    def test_resolves_toon_to_an_executable_absolute_path(self):
+        m = load()
+        resolved = m._resolve(m.TOON_BIN_ENV, m._TOON_FALLBACKS)
+        self.assertTrue(os.path.isabs(resolved), resolved)
+        self.assertTrue(os.access(resolved, os.X_OK), resolved)
+
+    def test_env_override_wins(self):
+        m = load()
+        os.environ["WOMR_TOON_BIN"] = "/custom/toon"
+        try:
+            self.assertEqual(m._resolve(m.TOON_BIN_ENV, m._TOON_FALLBACKS), "/custom/toon")
+        finally:
+            os.environ.pop("WOMR_TOON_BIN", None)
+
+
+class TestBlindIsNotRepeated(GateBase):
+    """Blind is a background condition; a confirmed breach is not."""
+
+    def test_blind_warns_once_then_goes_quiet(self):
+        m = load(BLIND)
+        self.assertIsNotNone(m.pre_llm_call(session_id="s"))   # fresh
+        self.assertIsNone(m.pre_llm_call(session_id="s"))      # cached -> quiet
+
+    def test_confirmed_breach_keeps_warning_every_turn(self):
+        m = load(BREACHED)
+        self.assertIsNotNone(m.pre_llm_call(session_id="s"))
+        self.assertIsNotNone(m.pre_llm_call(session_id="s"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=0)
