@@ -1,4 +1,6 @@
-"""Rail-anchor classification -- pure decision logic, no IO.
+"""Rail-anchor classification -- PURE decision logic. No IO, no imports beyond os.path.
+
+Scanning and path resolution live in __init__.py; this module only decides.
 
 A rail is ANCHOR-BREACHED when its module links resolve outside the repository
 that owns it: it may execute code that no longer matches its source, so both
@@ -77,42 +79,3 @@ def is_breach(rows: Sequence[Tuple[str, str]]) -> bool:
     if not rows:
         return True
     return any(verdict in BREACH_CLASSES for _name, verdict in rows)
-
-
-def scan_links(node_modules: str) -> list:
-    """The only IO in this module. Walk every scope, one level into each @scope."""
-    out = []
-    try:
-        entries = sorted(os.listdir(node_modules))
-    except OSError:
-        return out
-    for entry in entries:
-        path = os.path.join(node_modules, entry)
-        if entry.startswith("@"):
-            try:
-                inner = sorted(os.listdir(path))
-            except OSError:
-                continue
-            for sub in inner:
-                sub_path = os.path.join(path, sub)
-                if os.path.islink(sub_path):
-                    out.append(("%s/%s" % (entry, sub), _resolve(sub_path)))
-        elif os.path.islink(path):
-            out.append((entry, _resolve(path)))
-    return out
-
-
-def _resolve(path: str) -> Optional[str]:
-    try:
-        return os.path.realpath(path)
-    except OSError:
-        return None
-
-
-def audit(repo_root: str, workspace_root: str) -> list:
-    """Return [(name, verdict)] for every link under the repo's node_modules."""
-    links = scan_links(os.path.join(repo_root, "node_modules"))
-    return [
-        (name, classify(name, target, repo_root, workspace_root))
-        for name, target in links
-    ]

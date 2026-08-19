@@ -38,6 +38,45 @@ DEFAULT_REPO = "/home/wom/infra/womr"
 WORKSPACE_ROOT = "/home/wom/.hermes/kanban/workspaces"
 DEFAULT_INTERVAL_SECONDS = 300
 
+def _scan_links(node_modules: str) -> list:
+    """Walk every scope, one level into each @scope. IO lives here, not in anchor."""
+    out = []
+    try:
+        entries = sorted(os.listdir(node_modules))
+    except OSError:
+        return out
+    for entry in entries:
+        path = os.path.join(node_modules, entry)
+        if entry.startswith("@"):
+            try:
+                inner = sorted(os.listdir(path))
+            except OSError:
+                continue
+            for sub in inner:
+                sub_path = os.path.join(path, sub)
+                if os.path.islink(sub_path):
+                    out.append(("%s/%s" % (entry, sub), _resolve(sub_path)))
+        elif os.path.islink(path):
+            out.append((entry, _resolve(path)))
+    return out
+
+
+def _resolve(path: str) -> Optional[str]:
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return None
+
+
+def audit(repo_root: str, workspace_root: str) -> list:
+    """Return [(name, verdict)] for every link under the repo's node_modules."""
+    links = _scan_links(os.path.join(repo_root, "node_modules"))
+    return [
+        (name, anchor.classify(name, target, repo_root, workspace_root))
+        for name, target in links
+    ]
+
+
 _cache: dict = {"at": 0.0, "rows": None}
 
 
@@ -55,7 +94,7 @@ def _audit_cached(repo: str):
     interval = _int_env(INTERVAL_ENV, DEFAULT_INTERVAL_SECONDS)
     if _cache["rows"] is not None and (now - _cache["at"]) < interval:
         return _cache["rows"]
-    rows = anchor.audit(repo, WORKSPACE_ROOT)
+    rows = audit(repo, WORKSPACE_ROOT)
     _cache["at"], _cache["rows"] = now, rows
     return rows
 

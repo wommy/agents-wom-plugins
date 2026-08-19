@@ -1,0 +1,5 @@
+name: womr-skill-reachability
+version: '0.1.0'
+description: 'Warn at session start when a bare-name skill route resolves to a skill the harness cannot load.'
+provides_hooks:
+  - on_session_start

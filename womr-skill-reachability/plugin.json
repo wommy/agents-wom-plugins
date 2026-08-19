@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "wom.womr-skill-reachability",
+  "version": "0.1.0",
+  "description": "Session-start warning for bare-name skill routes the Skill tool cannot load.",
+  "license": "MIT",
+  "keywords": [
+    "hermes",
+    "skills",
+    "routing",
+    "reachability"
+  ],
+  "extensions": {
+    "com.nousresearch.hermes": {
+      "manifest": "plugin.yaml",
+      "entrypoint": "__init__.py",
+      "provides_hooks": [
+        "on_session_start"
+      ]
+    }
+  }
+}
