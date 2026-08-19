@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "wom.womr-kanban-governor",
+  "version": "0.1.0",
+  "description": "Structural priority governor for the Hermes kanban working lane.",
+  "license": "MIT",
+  "keywords": ["hermes", "kanban", "priority", "dispatch"],
+  "extensions": {
+    "com.nousresearch.hermes": {
+      "manifest": "plugin.yaml",
+      "entrypoint": "__init__.py",
+      "provides_hooks": ["on_kanban_dispatch_tick"]
+    }
+  }
+}

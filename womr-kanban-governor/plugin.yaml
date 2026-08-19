@@ -1,0 +1,5 @@
+name: womr-kanban-governor
+version: '0.1.0'
+description: 'Rank unranked working-lane kanban cards in-process on the dispatcher tick.'
+provides_hooks:
+  - on_kanban_dispatch_tick

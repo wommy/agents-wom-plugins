@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "wom.womr-rail-anchor",
+  "version": "0.1.0",
+  "description": "In-band rail-anchor breach warning for womr.",
+  "license": "MIT",
+  "keywords": [
+    "womr",
+    "rail",
+    "integrity",
+    "node_modules"
+  ],
+  "extensions": {
+    "com.nousresearch.hermes": {
+      "manifest": "plugin.yaml",
+      "entrypoint": "__init__.py",
+      "provides_hooks": [
+        "pre_llm_call",
+        "pre_tool_call"
+      ]
+    }
+  }
+}

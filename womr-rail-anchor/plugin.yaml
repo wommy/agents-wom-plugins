@@ -1,0 +1,6 @@
+name: womr-rail-anchor
+version: '0.1.0'
+description: 'Warn in-band when the womr rail resolves outside its repository.'
+provides_hooks:
+  - pre_llm_call
+  - pre_tool_call
