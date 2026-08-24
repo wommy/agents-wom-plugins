@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "wom.hermes-closure-gate",
+  "version": "0.1.0",
+  "description": "Portable companion package for the Hermes pre_verify closure gate.",
+  "repository": "https://github.com/agentplugins/agent-plugins-site",
+  "extensions": {
+    "com.nousresearch.hermes": {
+      "manifest": "plugin.yaml",
+      "entrypoint": "__init__.py",
+      "provides_hooks": ["pre_verify"]
+    }
+  }
+}

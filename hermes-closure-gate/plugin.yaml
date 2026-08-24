@@ -1,0 +1,5 @@
+name: hermes-closure-gate
+version: '0.1.0'
+description: 'User-owned pre_verify closure receipt gate for Hermes turns.'
+provides_hooks:
+  - pre_verify
