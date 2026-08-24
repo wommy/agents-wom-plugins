@@ -1,0 +1,28 @@
+{
+	"hooks": {
+		"PreToolUse": [
+			{
+				"matcher": "^update_plan$",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bun ${PLUGIN_ROOT}/hooks-handlers/codex-plan-observer.ts",
+						"async": true
+					}
+				]
+			}
+		],
+		"PostToolUse": [
+			{
+				"matcher": "^update_plan$",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bun ${PLUGIN_ROOT}/hooks-handlers/codex-plan-observer.ts",
+						"async": true
+					}
+				]
+			}
+		]
+	}
+}

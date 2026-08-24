@@ -1,0 +1,11 @@
+{
+	"$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+	"name": "tudo",
+	"version": "0.1.3",
+	"description": "Mirrors L1 harness TaskCreated/TaskCompleted hook events to a durable JSON file and plans demotion into the L2 roadmap backlog.",
+	"author": {
+		"name": "wom",
+		"email": "tom@technomad.media"
+	},
+	"hooks": "./hooks/claude/hooks.json"
+}

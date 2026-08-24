@@ -1,0 +1,16 @@
+{
+	"name": "tudo",
+	"private": true,
+	"type": "module",
+	"description": "Cross-client tasklist plugin: Claude task hooks and Codex native-plan hooks share the Womr tier-loop boundary.",
+	"scripts": {
+		"build": "bun build mcp/server.ts --outfile mcp/server.bundle.js --target=bun --minify"
+	},
+	"dependencies": {
+		"@effect/platform-bun": "4.0.0-beta.85",
+		"effect": "4.0.0-beta.90"
+	},
+	"devDependencies": {
+		"@effect/bun-test": "workspace:*"
+	}
+}

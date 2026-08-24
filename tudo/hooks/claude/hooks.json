@@ -1,0 +1,24 @@
+{
+	"hooks": {
+		"TaskCreated": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/claude-mcp-observer.ts"
+					}
+				]
+			}
+		],
+		"TaskCompleted": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/claude-mcp-observer.ts"
+					}
+				]
+			}
+		]
+	}
+}

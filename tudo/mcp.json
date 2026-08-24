@@ -1,0 +1,15 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+	"mcpServers": {
+		"tudo": {
+			"type": "stdio",
+			"command": "bun",
+			"args": ["${PLUGIN_ROOT}/mcp/server.bundle.js"],
+			"env": {
+				"XDG_CONFIG_HOME": "${PLUGIN_DATA}",
+				"XDG_CACHE_HOME": "${PLUGIN_DATA}"
+			},
+			"cwd": "${PLUGIN_ROOT}"
+		}
+	}
+}

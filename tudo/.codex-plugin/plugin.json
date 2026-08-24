@@ -1,0 +1,7 @@
+{
+	"name": "tudo",
+	"version": "0.1.3",
+	"description": "Three-tier tasklist workflow for L1 session work, L2 Womr backlog, and L3 Hermes Kanban receipts.",
+	"skills": "./skills/",
+	"hooks": "./hooks/codex/hooks.json"
+}

@@ -1,0 +1,13 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "tudo",
+	"version": "0.1.3",
+	"description": "Three-tier tasklist interface for L1 harness tasks, L2 Womr roadmap work, and L3 Hermes Kanban execution receipts.",
+	"license": "MIT",
+	"keywords": ["tasklist", "womr", "hermes", "kanban"],
+	"extensions": {
+		"com.anthropic.claude-code": {
+			"hooks": "hooks/claude/hooks.json"
+		}
+	}
+}
