@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "agent-plugins",
+  "version": "0.0.1",
+  "description": "Portable Agent Plugins v1 specification spike for the agents-wom plugin home.",
+  "author": {
+    "name": "wommy"
+  },
+  "license": "MIT",
+  "keywords": ["agent-plugins", "plugins", "skills", "mcp", "hermes"],
+  "extensions": {}
+}
